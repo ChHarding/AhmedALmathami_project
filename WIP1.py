@@ -1,0 +1,1 @@
+print("Hello. This is gitpull assignment part 2")
