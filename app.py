@@ -182,6 +182,7 @@ def add_expense() -> None:
 
 
 
+
 def delete_last_entry() -> None:
     """Remove the last data row from the CSV (simple undo)."""
     rows = read_rows()
