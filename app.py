@@ -15,12 +15,38 @@ import csv
 import os
 import datetime as dt
 from typing import List, Dict, Iterable, Optional
+import sys
+import pandas as pd
+from tabulate import tabulate
+
 
 # ---------- Paths / constants ----------
 CSV_DIR = "data"
 REPORTS_DIR = os.path.join(CSV_DIR, "reports")
 CSV = os.path.join(CSV_DIR, "expenses.csv")
 HEADERS = ["Date", "Amount", "Category", "Description"]
+
+# ---------- Pandas DataFrame helpers ----------
+DF_COLS = ["Date", "Amount", "Category", "Description"]
+
+def load_df() -> pd.DataFrame:
+    ensure_dirs_and_csv()
+    if os.path.getsize(CSV) == 0:
+        return pd.DataFrame(columns=DF_COLS)
+    df = pd.read_csv(CSV, dtype=str)
+    
+    df = df.reindex(columns=DF_COLS)
+    
+    df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce").fillna(0.0).round(2)
+    df["Category"] = df["Category"].fillna("").astype(str)
+    df["Description"] = df["Description"].fillna("").astype(str)
+    return df
+
+def save_df(df: pd.DataFrame) -> None:
+    
+    out = df.copy()
+    out["Amount"] = out["Amount"].astype(float).round(2)
+    out.to_csv(CSV, index=False)
 
 
 # ---------- Setup & utilities ----------
@@ -143,14 +169,18 @@ def format_expense_table(rows: List[List[str]], show_index: bool = True) -> str:
 
 # ---------- Core actions ----------
 def add_expense() -> None:
-    """Collect a single expense from user and append to CSV."""
     date = ask_date()
-    amt = ask_amount()
-    cat = input("Category (e.g., Food, Transport): ").strip() or "General"
+    amt = ask_amount()  # supports comma or dot already
+    cat = (input("Category (e.g., Food, Transport): ").strip() or "General").title()
     desc = input("Description: ").strip()
-    with open(CSV, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([date, amt, cat, desc])
+
+    df = load_df()
+    new_row = {"Date": date, "Amount": float(amt), "Category": cat, "Description": desc}
+    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    save_df(df)
     print("✅ Saved.\n")
+
+
 
 
 def delete_last_entry() -> None:
@@ -165,69 +195,78 @@ def delete_last_entry() -> None:
 
 
 def delete_by_index() -> None:
-    """Delete a specific row by its index (as shown in the table)."""
-    rows = read_rows()
-    if not rows:
+    df = load_df()
+    if df.empty:
         print("No expenses to delete.\n")
         return
-    print(format_expense_table(rows))
+    print_df(df)
     try:
         idx = int(input("Enter index (#) to delete: ").strip())
-        if idx < 0 or idx >= len(rows):
-            print("❗ Invalid index.\n")
-            return
     except ValueError:
         print("❗ Please enter a number.\n")
         return
-    deleted = rows.pop(idx)
-    write_rows(rows)
-    print(f"🗑️ Deleted: {deleted}\n")
+    if idx < 0 or idx >= len(df):
+        print("❗ Invalid index.\n")
+        return
+
+    print(f"About to delete: {df.iloc[idx].to_dict()}")
+    if input("Are you sure? (y/N): ").strip().lower() != "y":
+        print("Canceled.\n")
+        return
+
+    df = df.drop(df.index[idx]).reset_index(drop=True)
+    save_df(df)
+    print("🗑️ Deleted.\n")
+
 
 
 def edit_by_index() -> None:
-    """
-    Edit a specific row by index.
-    Prompts each field with its current value as default.
-    """
-    rows = read_rows()
-    if not rows:
+    df = load_df()
+    if df.empty:
         print("No expenses to edit.\n")
         return
-    print(format_expense_table(rows))
+    print_df(df)
+
     try:
         idx = int(input("Enter index (#) to edit: ").strip())
-        if idx < 0 or idx >= len(rows):
-            print("❗ Invalid index.\n")
-            return
     except ValueError:
         print("❗ Please enter a number.\n")
         return
+    if idx < 0 or idx >= len(df):
+        print("❗ Invalid index.\n")
+        return
 
-    date, amt, cat, desc = rows[idx]
-
-    
+    row = df.iloc[idx]
+    # date
     while True:
-        new_date = input_with_default("Date (YYYY-MM-DD)", date)
+        new_date = input_with_default("Date (YYYY-MM-DD)", str(row["Date"]))
         try:
             parse_iso_date(new_date)
             break
         except ValueError:
             print("❗ Please use YYYY-MM-DD.")
-
+    # amount
     while True:
-        amt_raw = input_with_default("Amount", format_money(amt)).replace(",", ".")
+        amt_raw = input_with_default("Amount", format_money(row["Amount"])).replace(",", ".")
         try:
-            new_amt = f"{round(float(amt_raw), 2):.2f}"
+            new_amt = round(float(amt_raw), 2)
             break
         except ValueError:
             print("❗ Amount must be a number.")
+    # category (must not be blank)
+    while True:
+        new_cat = input_with_default("Category", str(row["Category"]) or "General").strip()
+        if new_cat:
+            new_cat = new_cat.title()
+            break
+        print("❗ Category cannot be blank.")
+    # description
+    new_desc = input_with_default("Description", str(row["Description"])).strip()
 
-    new_cat = input_with_default("Category", cat or "General")
-    new_desc = input_with_default("Description", desc)
-
-    rows[idx] = [new_date, new_amt, new_cat, new_desc]
-    write_rows(rows)
+    df.iloc[idx] = [new_date, new_amt, new_cat, new_desc]
+    save_df(df)
     print("✏️ Updated.\n")
+
 
 
 # ---------- Filters and views ----------
@@ -259,56 +298,67 @@ def filter_rows(
     return out
 
 
-def view_expenses() -> List[List[str]]:
+# ---------- New Table Display (pandas + tabulate) ----------
 
-    rows = read_rows()
-    if not rows:
+def print_df(df: pd.DataFrame) -> None:
+    """Display the DataFrame in a neat table using tabulate."""
+    if df.empty:
+        print("No expenses yet.\n")
+        return
+    display = df.copy()
+    display.index.name = "#"  # show index column for edit/delete reference
+    print(tabulate(display, headers="keys", tablefmt="grid", showindex=True))
+
+
+def view_expenses() -> List[List[str]]:
+    """View and filter expenses using pandas DataFrame."""
+    df = load_df()  # load CSV as DataFrame
+    if df.empty:
         print("No expenses yet.\n")
         return []
 
-    # Ask filters
     use_filters = input("Apply filters? (y/N): ").strip().lower() == "y"
-    cat = None
-    sdate = None
-    edate = None
-    text = None
     if use_filters:
         cat_in = input("Category filter (blank = all): ").strip()
-        cat = cat_in or None
         sdate = ask_optional_date("Start date (YYYY-MM-DD) [blank = none]: ")
         edate = ask_optional_date("End date   (YYYY-MM-DD) [blank = none]: ")
-        text_in = input("Text search (in any field, blank = none): ").strip()
-        text = text_in or None
+        text_in = input("Text search (blank = none): ").strip()
 
-    rows = filter_rows(rows, category=cat, start_date=sdate, end_date=edate, text=text)
-    if not rows:
+        mask = pd.Series([True] * len(df))  # start with all rows visible
+        if cat_in:
+            mask &= df["Category"].str.lower().eq(cat_in.lower())
+        if sdate:
+            mask &= df["Date"] >= sdate
+        if edate:
+            mask &= df["Date"] <= edate
+        if text_in:
+            blob = df.astype(str).apply(lambda row: " ".join(row.values).lower(), axis=1)
+            mask &= blob.str.contains(text_in.lower(), na=False)
+
+        df = df[mask]
+
+    if df.empty:
         print("No matching expenses.\n")
         return []
 
-    print(format_expense_table(rows))
+    print_df(df)
     print()
-    return rows
+
+    # Return rows as list of lists to keep export feature working
+    return df[DF_COLS].astype(str).values.tolist()
+
 
 
 # ---------- Summaries ----------
 def summarize_by_category() -> None:
-    """Print total amount grouped by Category."""
-    rows = read_rows()
-    if not rows:
+    df = load_df()
+    if df.empty:
         print("No expenses yet.\n")
         return
-
-    totals: Dict[str, float] = {}
-    for date, amt, cat, desc in rows:
-        try:
-            totals[cat] = totals.get(cat, 0.0) + float(amt)
-        except ValueError:
-            continue
-
-    header = ["Category", "Total"]
-    data = [[cat, f"{totals[cat]:.2f}"] for cat in sorted(totals)]
-    print(_format_table_generic([header] + data))
+    out = df.groupby("Category", dropna=False)["Amount"].sum().reset_index(name="Total")
+    print(tabulate(out, headers="keys", tablefmt="grid"))
     print()
+
 
 
 def summarize_by_date() -> None:
@@ -386,48 +436,54 @@ def export_rows(rows: List[List[str]]) -> None:
 def main() -> None:
     """Menu loop (simple CLI)."""
     ensure_dirs_and_csv()
-    last_view: List[List[str]] = []  # store last viewed rows for quick export
+    last_view: List[List[str]] = []
 
-    while True:
-        print("1) Add expense")
-        print("2) View expenses (with optional filters)")
-        print("3) Summary by category")
-        print("4) Summary by date")
-        print("5) Summary by month")
-        print("6) Show total of all expenses")
-        print("7) Edit entry by index")
-        print("8) Delete entry by index")
-        print("9) Delete last entry (undo)")
-        print("10) Export last viewed rows")
-        print("11) Quit")
-        choice = input("> ").strip()
+    try:
+        while True:
+            print("1) Add expense")
+            print("2) View expenses (with optional filters)")
+            print("3) Summary by category")
+            print("4) Summary by date")
+            print("5) Summary by month")
+            print("6) Show total of all expenses")
+            print("7) Edit entry by index")
+            print("8) Delete entry by index")
+            print("9) Delete last entry (undo)")
+            print("10) Export last viewed rows")
+            print("11) Quit")
+            choice = input("> ").strip()
 
-        if choice == "1":
-            add_expense()
-        elif choice == "2":
-            last_view = view_expenses()
-        elif choice == "3":
-            summarize_by_category()
-        elif choice == "4":
-            summarize_by_date()
-        elif choice == "5":
-            summarize_by_month()
-        elif choice == "6":
-            show_total()
-        elif choice == "7":
-            edit_by_index()
-        elif choice == "8":
-            delete_by_index()
-        elif choice == "9":
-            delete_last_entry()
-        elif choice == "10":
-            if not last_view:
-                print("Tip: choose 'View expenses' first to select what to export.\n")
-            export_rows(last_view)
-        elif choice == "11":
-            break
-        else:
-            print("Try 1–11.\n")
+            if choice == "1":
+                add_expense()
+            elif choice == "2":
+                last_view = view_expenses()
+            elif choice == "3":
+                summarize_by_category()
+            elif choice == "4":
+                summarize_by_date()
+            elif choice == "5":
+                summarize_by_month()
+            elif choice == "6":
+                show_total()
+            elif choice == "7":
+                edit_by_index()
+            elif choice == "8":
+                delete_by_index()
+            elif choice == "9":
+                delete_last_entry()
+            elif choice == "10":
+                if not last_view:
+                    print("Tip: choose 'View expenses' first to select what to export.\n")
+                export_rows(last_view)
+            elif choice == "11":
+                print("Goodbye!")
+                sys.exit(0)
+            else:
+                print("Try 1–11.\n")
+    except KeyboardInterrupt:
+        print("\nInterrupted. Exiting gracefully.")
+        sys.exit(0)
+
 
 
 # ---------- Entry point ----------
