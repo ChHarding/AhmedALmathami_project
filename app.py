@@ -195,23 +195,29 @@ def delete_last_entry() -> None:
 
 
 def delete_by_index() -> None:
-    """Delete a specific row by its index (as shown in the table)."""
-    rows = read_rows()
-    if not rows:
+    df = load_df()
+    if df.empty:
         print("No expenses to delete.\n")
         return
-    print(format_expense_table(rows))
+    print_df(df)
     try:
         idx = int(input("Enter index (#) to delete: ").strip())
-        if idx < 0 or idx >= len(rows):
-            print("❗ Invalid index.\n")
-            return
     except ValueError:
         print("❗ Please enter a number.\n")
         return
-    deleted = rows.pop(idx)
-    write_rows(rows)
-    print(f"🗑️ Deleted: {deleted}\n")
+    if idx < 0 or idx >= len(df):
+        print("❗ Invalid index.\n")
+        return
+
+    print(f"About to delete: {df.iloc[idx].to_dict()}")
+    if input("Are you sure? (y/N): ").strip().lower() != "y":
+        print("Canceled.\n")
+        return
+
+    df = df.drop(df.index[idx]).reset_index(drop=True)
+    save_df(df)
+    print("🗑️ Deleted.\n")
+
 
 
 def edit_by_index() -> None:
