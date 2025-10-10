@@ -215,49 +215,52 @@ def delete_by_index() -> None:
 
 
 def edit_by_index() -> None:
-    """
-    Edit a specific row by index.
-    Prompts each field with its current value as default.
-    """
-    rows = read_rows()
-    if not rows:
+    df = load_df()
+    if df.empty:
         print("No expenses to edit.\n")
         return
-    print(format_expense_table(rows))
+    print_df(df)
+
     try:
         idx = int(input("Enter index (#) to edit: ").strip())
-        if idx < 0 or idx >= len(rows):
-            print("❗ Invalid index.\n")
-            return
     except ValueError:
         print("❗ Please enter a number.\n")
         return
+    if idx < 0 or idx >= len(df):
+        print("❗ Invalid index.\n")
+        return
 
-    date, amt, cat, desc = rows[idx]
-
-    
+    row = df.iloc[idx]
+    # date
     while True:
-        new_date = input_with_default("Date (YYYY-MM-DD)", date)
+        new_date = input_with_default("Date (YYYY-MM-DD)", str(row["Date"]))
         try:
             parse_iso_date(new_date)
             break
         except ValueError:
             print("❗ Please use YYYY-MM-DD.")
-
+    # amount
     while True:
-        amt_raw = input_with_default("Amount", format_money(amt)).replace(",", ".")
+        amt_raw = input_with_default("Amount", format_money(row["Amount"])).replace(",", ".")
         try:
-            new_amt = f"{round(float(amt_raw), 2):.2f}"
+            new_amt = round(float(amt_raw), 2)
             break
         except ValueError:
             print("❗ Amount must be a number.")
+    # category (must not be blank)
+    while True:
+        new_cat = input_with_default("Category", str(row["Category"]) or "General").strip()
+        if new_cat:
+            new_cat = new_cat.title()
+            break
+        print("❗ Category cannot be blank.")
+    # description
+    new_desc = input_with_default("Description", str(row["Description"])).strip()
 
-    new_cat = input_with_default("Category", cat or "General")
-    new_desc = input_with_default("Description", desc)
-
-    rows[idx] = [new_date, new_amt, new_cat, new_desc]
-    write_rows(rows)
+    df.iloc[idx] = [new_date, new_amt, new_cat, new_desc]
+    save_df(df)
     print("✏️ Updated.\n")
+
 
 
 # ---------- Filters and views ----------
