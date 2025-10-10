@@ -15,12 +15,38 @@ import csv
 import os
 import datetime as dt
 from typing import List, Dict, Iterable, Optional
+import sys
+import pandas as pd
+from tabulate import tabulate
+
 
 # ---------- Paths / constants ----------
 CSV_DIR = "data"
 REPORTS_DIR = os.path.join(CSV_DIR, "reports")
 CSV = os.path.join(CSV_DIR, "expenses.csv")
 HEADERS = ["Date", "Amount", "Category", "Description"]
+
+# ---------- Pandas DataFrame helpers ----------
+DF_COLS = ["Date", "Amount", "Category", "Description"]
+
+def load_df() -> pd.DataFrame:
+    ensure_dirs_and_csv()
+    if os.path.getsize(CSV) == 0:
+        return pd.DataFrame(columns=DF_COLS)
+    df = pd.read_csv(CSV, dtype=str)
+    
+    df = df.reindex(columns=DF_COLS)
+    
+    df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce").fillna(0.0).round(2)
+    df["Category"] = df["Category"].fillna("").astype(str)
+    df["Description"] = df["Description"].fillna("").astype(str)
+    return df
+
+def save_df(df: pd.DataFrame) -> None:
+    
+    out = df.copy()
+    out["Amount"] = out["Amount"].astype(float).round(2)
+    out.to_csv(CSV, index=False)
 
 
 # ---------- Setup & utilities ----------
@@ -143,14 +169,17 @@ def format_expense_table(rows: List[List[str]], show_index: bool = True) -> str:
 
 # ---------- Core actions ----------
 def add_expense() -> None:
-    """Collect a single expense from user and append to CSV."""
     date = ask_date()
-    amt = ask_amount()
-    cat = input("Category (e.g., Food, Transport): ").strip() or "General"
+    amt = ask_amount()  # supports comma or dot already
+    cat = (input("Category (e.g., Food, Transport): ").strip() or "General").title()
     desc = input("Description: ").strip()
-    with open(CSV, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([date, amt, cat, desc])
+
+    df = load_df()
+    new_row = {"Date": date, "Amount": float(amt), "Category": cat, "Description": desc}
+    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    save_df(df)
     print("✅ Saved.\n")
+
 
 
 def delete_last_entry() -> None:
@@ -259,35 +288,55 @@ def filter_rows(
     return out
 
 
-def view_expenses() -> List[List[str]]:
+# ---------- New Table Display (pandas + tabulate) ----------
 
-    rows = read_rows()
-    if not rows:
+def print_df(df: pd.DataFrame) -> None:
+    """Display the DataFrame in a neat table using tabulate."""
+    if df.empty:
+        print("No expenses yet.\n")
+        return
+    display = df.copy()
+    display.index.name = "#"  # show index column for edit/delete reference
+    print(tabulate(display, headers="keys", tablefmt="grid", showindex=True))
+
+
+def view_expenses() -> List[List[str]]:
+    """View and filter expenses using pandas DataFrame."""
+    df = load_df()  # load CSV as DataFrame
+    if df.empty:
         print("No expenses yet.\n")
         return []
 
-    # Ask filters
     use_filters = input("Apply filters? (y/N): ").strip().lower() == "y"
-    cat = None
-    sdate = None
-    edate = None
-    text = None
     if use_filters:
         cat_in = input("Category filter (blank = all): ").strip()
-        cat = cat_in or None
         sdate = ask_optional_date("Start date (YYYY-MM-DD) [blank = none]: ")
         edate = ask_optional_date("End date   (YYYY-MM-DD) [blank = none]: ")
-        text_in = input("Text search (in any field, blank = none): ").strip()
-        text = text_in or None
+        text_in = input("Text search (blank = none): ").strip()
 
-    rows = filter_rows(rows, category=cat, start_date=sdate, end_date=edate, text=text)
-    if not rows:
+        mask = pd.Series([True] * len(df))  # start with all rows visible
+        if cat_in:
+            mask &= df["Category"].str.lower().eq(cat_in.lower())
+        if sdate:
+            mask &= df["Date"] >= sdate
+        if edate:
+            mask &= df["Date"] <= edate
+        if text_in:
+            blob = df.astype(str).apply(lambda row: " ".join(row.values).lower(), axis=1)
+            mask &= blob.str.contains(text_in.lower(), na=False)
+
+        df = df[mask]
+
+    if df.empty:
         print("No matching expenses.\n")
         return []
 
-    print(format_expense_table(rows))
+    print_df(df)
     print()
-    return rows
+
+    # Return rows as list of lists to keep export feature working
+    return df[DF_COLS].astype(str).values.tolist()
+
 
 
 # ---------- Summaries ----------
