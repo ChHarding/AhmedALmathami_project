@@ -445,48 +445,54 @@ def export_rows(rows: List[List[str]]) -> None:
 def main() -> None:
     """Menu loop (simple CLI)."""
     ensure_dirs_and_csv()
-    last_view: List[List[str]] = []  # store last viewed rows for quick export
+    last_view: List[List[str]] = []
 
-    while True:
-        print("1) Add expense")
-        print("2) View expenses (with optional filters)")
-        print("3) Summary by category")
-        print("4) Summary by date")
-        print("5) Summary by month")
-        print("6) Show total of all expenses")
-        print("7) Edit entry by index")
-        print("8) Delete entry by index")
-        print("9) Delete last entry (undo)")
-        print("10) Export last viewed rows")
-        print("11) Quit")
-        choice = input("> ").strip()
+    try:
+        while True:
+            print("1) Add expense")
+            print("2) View expenses (with optional filters)")
+            print("3) Summary by category")
+            print("4) Summary by date")
+            print("5) Summary by month")
+            print("6) Show total of all expenses")
+            print("7) Edit entry by index")
+            print("8) Delete entry by index")
+            print("9) Delete last entry (undo)")
+            print("10) Export last viewed rows")
+            print("11) Quit")
+            choice = input("> ").strip()
 
-        if choice == "1":
-            add_expense()
-        elif choice == "2":
-            last_view = view_expenses()
-        elif choice == "3":
-            summarize_by_category()
-        elif choice == "4":
-            summarize_by_date()
-        elif choice == "5":
-            summarize_by_month()
-        elif choice == "6":
-            show_total()
-        elif choice == "7":
-            edit_by_index()
-        elif choice == "8":
-            delete_by_index()
-        elif choice == "9":
-            delete_last_entry()
-        elif choice == "10":
-            if not last_view:
-                print("Tip: choose 'View expenses' first to select what to export.\n")
-            export_rows(last_view)
-        elif choice == "11":
-            break
-        else:
-            print("Try 1–11.\n")
+            if choice == "1":
+                add_expense()
+            elif choice == "2":
+                last_view = view_expenses()
+            elif choice == "3":
+                summarize_by_category()
+            elif choice == "4":
+                summarize_by_date()
+            elif choice == "5":
+                summarize_by_month()
+            elif choice == "6":
+                show_total()
+            elif choice == "7":
+                edit_by_index()
+            elif choice == "8":
+                delete_by_index()
+            elif choice == "9":
+                delete_last_entry()
+            elif choice == "10":
+                if not last_view:
+                    print("Tip: choose 'View expenses' first to select what to export.\n")
+                export_rows(last_view)
+            elif choice == "11":
+                print("Goodbye!")
+                sys.exit(0)
+            else:
+                print("Try 1–11.\n")
+    except KeyboardInterrupt:
+        print("\nInterrupted. Exiting gracefully.")
+        sys.exit(0)
+
 
 
 # ---------- Entry point ----------
