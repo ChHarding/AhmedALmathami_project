@@ -351,23 +351,14 @@ def view_expenses() -> List[List[str]]:
 
 # ---------- Summaries ----------
 def summarize_by_category() -> None:
-    """Print total amount grouped by Category."""
-    rows = read_rows()
-    if not rows:
+    df = load_df()
+    if df.empty:
         print("No expenses yet.\n")
         return
-
-    totals: Dict[str, float] = {}
-    for date, amt, cat, desc in rows:
-        try:
-            totals[cat] = totals.get(cat, 0.0) + float(amt)
-        except ValueError:
-            continue
-
-    header = ["Category", "Total"]
-    data = [[cat, f"{totals[cat]:.2f}"] for cat in sorted(totals)]
-    print(_format_table_generic([header] + data))
+    out = df.groupby("Category", dropna=False)["Amount"].sum().reset_index(name="Total")
+    print(tabulate(out, headers="keys", tablefmt="grid"))
     print()
+
 
 
 def summarize_by_date() -> None:
